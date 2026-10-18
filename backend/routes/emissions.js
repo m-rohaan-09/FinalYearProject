@@ -163,27 +163,77 @@ router.post(
           rows = await processExcel(req.file.path);
         }
 
+        if (rows.length === 0) {
+          throw new Error('The file contains no data rows.');
+        }
+
+        const requiredColumns = ['category', 'quantity', 'unit', 'period_start', 'period_end'];
+        const missingColumns = requiredColumns.filter(
+          (column) => !Object.prototype.hasOwnProperty.call(rows[0], column)
+        );
+        if (missingColumns.length > 0) {
+          throw new Error(`Missing required column${missingColumns.length > 1 ? 's' : ''}: ${missingColumns.join(', ')}.`);
+        }
+
         let importedCount = 0;
         const errors = [];
 
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           try {
-            const category = (row.category || '').toLowerCase().replace(/\s+/g, '_');
+            const normalizedCategory = (row.category || '')
+              .toLowerCase()
+              .trim()
+              .replace(/[^a-z0-9]+/g, '_')
+              .replace(/^_+|_+$/g, '');
+            const categoryAliases = { fuel_diesel_petrol: 'fuel' };
+            const category = categoryAliases[normalizedCategory] || normalizedCategory;
             if (!EMISSION_FACTORS[category]) {
-              errors.push(`Row ${i + 1}: Unknown category "${row.category}"`);
+              errors.push(`Row ${i + 2}: Unknown category "${row.category}"`);
               continue;
             }
 
-            const quantity = parseFloat(row.quantity);
-            if (isNaN(quantity) || quantity < 0) {
-              errors.push(`Row ${i + 1}: Invalid quantity`);
+            const parseNumber = (value) => {
+              const normalized = String(value ?? '').trim().replace(/,/g, '');
+              return normalized ? Number(normalized) : NaN;
+            };
+            const quantity = parseNumber(row.quantity);
+            if (!Number.isFinite(quantity) || quantity < 0) {
+              errors.push(`Row ${i + 2}: Invalid quantity`);
+              continue;
+            }
+
+            if (!String(row.unit || '').trim()) {
+              errors.push(`Row ${i + 2}: Unit is missing`);
+              continue;
+            }
+
+            const periodStart = row.period_start;
+            const periodEnd = row.period_end;
+            if (!periodStart || !periodEnd) {
+              errors.push(`Row ${i + 2}: Period start or period end is missing.`);
               continue;
             }
 
             const defaultFactor = EMISSION_FACTORS[category];
-            const factor = parseFloat(row.emission_factor) || defaultFactor.factor;
-            const scope = row.scope || defaultFactor.scope;
+            const factor = row.emission_factor === undefined || String(row.emission_factor).trim() === ''
+              ? defaultFactor.factor
+              : parseNumber(row.emission_factor);
+            if (!Number.isFinite(factor) || factor < 0) {
+              errors.push(`Row ${i + 2}: Invalid emission factor`);
+              continue;
+            }
+
+            const scopeValue = (row.scope || defaultFactor.scope)
+              .toLowerCase()
+              .trim()
+              .replace(/[^a-z0-9]+/g, '_')
+              .replace(/^_+|_+$/g, '');
+            if (!['scope_1', 'scope_2', 'scope_3'].includes(scopeValue)) {
+              errors.push(`Row ${i + 2}: Invalid scope "${row.scope}"`);
+              continue;
+            }
+            const scope = scopeValue;
 
             await EmissionData.create({
               companyId: parseInt(companyId),
@@ -192,12 +242,12 @@ router.post(
               subCategory: row.sub_category || null,
               scope,
               quantity,
-              unit: row.unit || 'unit',
+              unit: String(row.unit).trim(),
               emissionFactor: factor,
               emissionFactorUnit: defaultFactor.unit,
               co2Equivalent: quantity * factor,
-              periodStart: row.period_start || new Date().toISOString().split('T')[0],
-              periodEnd: row.period_end || new Date().toISOString().split('T')[0],
+              periodStart,
+              periodEnd,
               source: fileType === 'csv' ? 'csv_upload' : 'excel_upload',
               billUploadId: billUpload.id,
               notes: row.notes || null,
@@ -205,7 +255,7 @@ router.post(
             });
             importedCount++;
           } catch (rowErr) {
-            errors.push(`Row ${i + 1}: ${rowErr.message}`);
+            errors.push(`Row ${i + 2}: ${rowErr.message}`);
           }
         }
 
@@ -226,12 +276,16 @@ router.post(
           req,
         });
 
-        res.json({
+        const response = {
           message: `File processed: ${importedCount} records imported`,
           billUpload,
           importedCount,
           errors,
-        });
+        };
+        if (importedCount === 0) {
+          return res.status(422).json({ ...response, message: 'No records could be imported.' });
+        }
+        res.json(response);
       } catch (processErr) {
         await billUpload.update({ status: 'failed', errorLog: processErr.message });
         res.status(422).json({ message: 'File processing failed', error: processErr.message });

@@ -46,7 +46,15 @@ export default function BillUploadPage() {
   };
 
   // CSV/Excel upload handler
-  const onDropCSV = useCallback(async (acceptedFiles) => {
+  const onDropCSV = useCallback(async (acceptedFiles, fileRejections) => {
+    if (fileRejections.length > 0) {
+      const rejection = fileRejections[0];
+      const errorCode = rejection.errors[0]?.code;
+      setError(errorCode === 'file-too-large'
+        ? 'File is larger than the 10 MB limit'
+        : `Unsupported file. Please choose a CSV, XLS, or XLSX file${rejection.file?.name ? ` (received ${rejection.file.name})` : ''}.`);
+      return;
+    }
     if (!acceptedFiles.length || !company) return;
     const file = acceptedFiles[0];
     const formData = new FormData();
@@ -58,15 +66,17 @@ export default function BillUploadPage() {
     setError('');
     setImportResult(null);
     try {
-      const { data } = await API.post('/emissions/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { data } = await API.post('/emissions/upload', formData);
       setImportResult(data);
-      setSuccess(`${data.importedCount} records imported successfully`);
+      setSuccess(data.errors?.length
+        ? `${data.importedCount} records imported; ${data.errors.length} rows were skipped`
+        : `${data.importedCount} records imported successfully`);
       fetchUploads(company.id);
       setTimeout(() => setSuccess(''), 5000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Upload failed');
+      setImportResult(err.response?.data?.importedCount !== undefined ? err.response.data : null);
+      setError(err.response?.data?.error || err.response?.data?.message || 'Upload failed');
+      fetchUploads(company.id);
     } finally {
       setUploading(false);
     }
@@ -140,7 +150,15 @@ export default function BillUploadPage() {
 
   const csvDropzone = useDropzone({
     onDrop: onDropCSV,
-    accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] },
+    accept: {
+      'text/csv': ['.csv'],
+      'application/csv': ['.csv'],
+      'text/comma-separated-values': ['.csv'],
+      'application/vnd.ms-excel': ['.csv', '.xls'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'text/plain': ['.csv'],
+      'application/octet-stream': ['.csv'],
+    },
     maxFiles: 1,
     maxSize: 10 * 1024 * 1024,
     disabled: uploading,
@@ -247,8 +265,10 @@ export default function BillUploadPage() {
           {importResult && (
             <div className="bg-surface-container-low rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-on-surface">
-                <span className="material-symbols-outlined text-primary text-[18px]">check_circle</span>
-                Import Complete
+                <span className={`material-symbols-outlined text-[18px] ${importResult.importedCount > 0 ? 'text-primary' : 'text-error'}`}>
+                  {importResult.importedCount > 0 ? 'check_circle' : 'error'}
+                </span>
+                Import Results
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
                 <div className="p-3 bg-surface rounded-lg">

@@ -21,8 +21,12 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   const allowedMimes = [
     'text/csv',
+    'application/csv',
+    'text/comma-separated-values',
+    'text/plain',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/octet-stream',
     'application/pdf',
     'image/png',
     'image/jpeg',
