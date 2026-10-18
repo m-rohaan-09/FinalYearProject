@@ -83,6 +83,7 @@ pip install -r requirements.txt
 cd ../../frontend
 npm install
 ```
+The frontend uses `http://localhost:5000/api` by default. To point it at a different backend, create `frontend/.env.local` with `REACT_APP_API_URL` set to the backend API base URL, then restart the frontend.
 
 ---
 

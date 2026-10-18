@@ -12,13 +12,29 @@ router.use(authenticate);
 // ─── GET MY COMPANY ───────────────────────────────────
 router.get('/mine', async (req, res) => {
   try {
-    const company = await Company.findOne({
+    let company = await Company.findOne({
       where: { ownerId: req.user.id },
       include: [{ model: Department, as: 'departments' }],
     });
 
     if (!company) {
-      return res.status(404).json({ message: 'No company profile found', needsOnboarding: true });
+      const membership = await CompanyMember.findOne({
+        where: { userId: req.user.id, status: 'active' },
+        include: [{
+          model: Company,
+          as: 'company',
+          include: [{ model: Department, as: 'departments' }],
+        }],
+        order: [['createdAt', 'DESC']],
+      });
+      company = membership?.company || null;
+    }
+
+    if (!company) {
+      return res.status(404).json({
+        message: 'No company profile found',
+        needsOnboarding: req.user.role === 'company_rep' || req.user.role === 'admin',
+      });
     }
 
     res.json({ company });

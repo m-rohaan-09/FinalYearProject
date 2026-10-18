@@ -24,6 +24,7 @@ const app = express();
 app.use(helmet());
 const allowedOrigins = [
   process.env.CLIENT_URL,
+  'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:3002',
 ].filter(Boolean);
@@ -58,10 +59,6 @@ app.use('/api/emissions', emissionRoutes);
 app.use('/api/ocr', ocrRoutes);
 app.use('/api/baseline', baselineRoutes);
 app.use('/api/ai', aiRoutes);
-
-// Serve uploaded files (protected)
-const path = require('path');
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { Department, Company } = require('../models');
+const { Department, Company, CompanyMember } = require('../models');
 const { authenticate, authorize } = require('../middleware/auth');
 const logAudit = require('../utils/auditLogger');
 
@@ -12,16 +12,22 @@ router.use(authenticate);
 router.get('/mine', async (req, res) => {
   try {
     const company = await Company.findOne({ where: { ownerId: req.user.id } });
-    if (!company) {
+    const membership = company ? null : await CompanyMember.findOne({
+      where: { userId: req.user.id, status: 'active' },
+      include: [{ model: Company, as: 'company' }],
+      order: [['createdAt', 'DESC']],
+    });
+    const resolvedCompany = company || membership?.company;
+    if (!resolvedCompany) {
       return res.status(404).json({ message: 'No company profile found' });
     }
 
     const departments = await Department.findAll({
-      where: { companyId: company.id },
+      where: { companyId: resolvedCompany.id },
       order: [['name', 'ASC']],
     });
 
-    res.json({ departments, companyId: company.id });
+    res.json({ departments, companyId: resolvedCompany.id });
   } catch (err) {
     console.error('Get departments error:', err);
     res.status(500).json({ message: 'Server error' });
